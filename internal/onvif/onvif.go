@@ -15,6 +15,7 @@ import (
 	"github.com/AlexxIT/go2rtc/internal/streams"
 	"github.com/AlexxIT/go2rtc/pkg/core"
 	"github.com/AlexxIT/go2rtc/pkg/onvif"
+	"github.com/AlexxIT/go2rtc/pkg/shell"
 	"github.com/rs/zerolog"
 )
 
@@ -63,6 +64,11 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 
 	log.Trace().Msgf("[onvif] server request %s %s:\n%s", r.Method, r.RequestURI, b)
 
+	protocol := "http"
+	if api.IsHTTPS {
+		protocol = "https"
+	}
+
 	switch operation {
 	case onvif.DeviceGetNetworkInterfaces, // important for Hass
 		onvif.DeviceGetSystemDateAndTime, // important for Hass
@@ -81,10 +87,10 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 
 	case onvif.DeviceGetCapabilities:
 		// important for Hass: Media section
-		b = onvif.GetCapabilitiesResponse(r.Host)
+		b = onvif.GetCapabilitiesResponse(protocol, r.Host)
 
 	case onvif.DeviceGetServices:
-		b = onvif.GetServicesResponse(r.Host)
+		b = onvif.GetServicesResponse(protocol, r.Host)
 
 	case onvif.DeviceGetDeviceInformation:
 		// important for Hass: SerialNumber (unique server ID)
@@ -132,7 +138,7 @@ func onvifDeviceService(w http.ResponseWriter, r *http.Request) {
 		b = onvif.GetStreamUriResponse(uri)
 
 	case onvif.MediaGetSnapshotUri:
-		uri := "http://" + r.Host + "/api/frame.jpeg?src=" + onvif.FindTagValue(b, "ProfileToken")
+		uri := protocol + "://" + r.Host + "/api/frame.jpeg?src=" + onvif.FindTagValue(b, "ProfileToken")
 		b = onvif.GetSnapshotUriResponse(uri)
 
 	default:
@@ -156,21 +162,22 @@ func apiOnvif(w http.ResponseWriter, r *http.Request) {
 	var items []*api.Source
 
 	if src == "" {
-		urls, err := onvif.DiscoveryStreamingURLs()
+		devices, err := onvif.DiscoveryONVIFDevices()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		for _, rawURL := range urls {
+		for _, device := range devices {
+			rawURL := device.URL
 			u, err := url.Parse(rawURL)
 			if err != nil {
-				log.Warn().Str("url", rawURL).Msg("[onvif] broken")
+				log.Warn().Str("url", shell.Redact(rawURL)).Msg("[onvif] broken")
 				continue
 			}
 
 			if u.Scheme != "http" {
-				log.Warn().Str("url", rawURL).Msg("[onvif] unsupported")
+				log.Warn().Str("url", shell.Redact(rawURL)).Msg("[onvif] unsupported")
 				continue
 			}
 
@@ -181,7 +188,7 @@ func apiOnvif(w http.ResponseWriter, r *http.Request) {
 				u.Path = ""
 			}
 
-			items = append(items, &api.Source{Name: u.Host, URL: u.String()})
+			items = append(items, &api.Source{ID: device.UUID, Name: device.Name, URL: u.String(), Info: device.Hardware})
 		}
 	} else {
 		client, err := onvif.NewClient(src)
@@ -207,17 +214,38 @@ func apiOnvif(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		sourceURL, err := url.Parse(src)
+		if err != nil {
+			log.Warn().Str("url", src).Msg("[onvif] broken source url")
+		}
+
+		deviceID := sourceURL.Host
+		if deviceID == "" {
+			deviceID = "unknown"
+		}
+
 		for i, token := range tokens {
+			streamName := name
+			if len(tokens) > 1 {
+				streamName += " stream" + strconv.Itoa(i+1)
+			}
+
+			streamID := "stream" + strconv.Itoa(i+1)
+
 			items = append(items, &api.Source{
-				Name: name + " stream" + strconv.Itoa(i),
+				ID:   streamID,
+				Name: streamName,
 				URL:  src + "?subtype=" + token,
+				Info: token,
 			})
 		}
 
 		if len(tokens) > 0 && client.HasSnapshots() {
 			items = append(items, &api.Source{
+				ID:   "snapshot",
 				Name: name + " snapshot",
 				URL:  src + "?subtype=" + tokens[0] + "&snapshot",
+				Info: tokens[0],
 			})
 		}
 	}

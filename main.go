@@ -6,6 +6,7 @@ import (
 	"github.com/AlexxIT/go2rtc/internal/api/ws"
 	"github.com/AlexxIT/go2rtc/internal/app"
 	"github.com/AlexxIT/go2rtc/internal/bubble"
+	"github.com/AlexxIT/go2rtc/internal/cui"
 	"github.com/AlexxIT/go2rtc/internal/debug"
 	"github.com/AlexxIT/go2rtc/internal/doorbird"
 	"github.com/AlexxIT/go2rtc/internal/dvrip"
@@ -35,6 +36,7 @@ import (
 	"github.com/AlexxIT/go2rtc/internal/srtp"
 	"github.com/AlexxIT/go2rtc/internal/streams"
 	"github.com/AlexxIT/go2rtc/internal/tapo"
+	"github.com/AlexxIT/go2rtc/internal/tuya"
 	"github.com/AlexxIT/go2rtc/internal/v4l2"
 	"github.com/AlexxIT/go2rtc/internal/webrtc"
 	"github.com/AlexxIT/go2rtc/internal/webtorrent"
@@ -44,7 +46,7 @@ import (
 )
 
 func main() {
-	app.Version = "1.9.10"
+	app.Version = "1.9.9-cui.37"
 
 	// 1. Core modules: app, api/ws, streams
 
@@ -88,6 +90,7 @@ func main() {
 	roborock.Init() // roborock source
 	homekit.Init()  // homekit source
 	ring.Init()     // ring source
+	tuya.Init()     // tuya source
 	nest.Init()     // nest source
 	bubble.Init()   // bubble source
 	expr.Init()     // expr source
@@ -98,6 +101,8 @@ func main() {
 	flussonic.Init()
 	eseecloud.Init()
 	yandex.Init()
+
+	cui.Init() // cui source
 
 	// 6. Helper modules
 

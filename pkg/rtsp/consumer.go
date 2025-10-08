@@ -1,6 +1,7 @@
 package rtsp
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/AlexxIT/go2rtc/pkg/aac"
@@ -22,20 +23,19 @@ func (c *Conn) AddTrack(media *core.Media, codec *core.Codec, track *core.Receiv
 
 	switch c.mode {
 	case core.ModeActiveProducer: // backchannel
-		c.stateMu.Lock()
-		defer c.stateMu.Unlock()
-
-		if c.state == StatePlay {
-			if err = c.Reconnect(); err != nil {
-				return
+		var rtspMedia *core.Media
+		for _, m := range c.Medias {
+			if m.Equal(media) {
+				rtspMedia = m
+				break
 			}
 		}
 
-		if channel, err = c.SetupMedia(media); err != nil {
-			return
+		if rtspMedia == nil {
+			return fmt.Errorf("rtsp: could not add track for media %s", media.String())
 		}
 
-		c.state = StateSetup
+		channel = rtspMedia.Channel
 
 	case core.ModePassiveConsumer:
 		channel = byte(len(c.Senders)) * 2
@@ -51,6 +51,8 @@ func (c *Conn) AddTrack(media *core.Media, codec *core.Codec, track *core.Receiv
 
 	// save original codec to sender (can have Codec.Name = ANY)
 	sender := core.NewSender(media, codec)
+	sender.UseGOP = c.GOP
+
 	// important to send original codec for valid IsRTP check
 	sender.Handler = c.packetWriter(track.Codec, channel, codec.PayloadType)
 
@@ -59,7 +61,8 @@ func (c *Conn) AddTrack(media *core.Media, codec *core.Codec, track *core.Receiv
 		sender.Handler = pcm.RepackG711(true, sender.Handler)
 	}
 
-	sender.HandleRTP(track)
+	// Bind here, start sender after Play
+	sender.Bind(track)
 
 	c.Senders = append(c.Senders, sender)
 	return nil
@@ -85,13 +88,22 @@ func (c *Conn) packetWriter(codec *core.Codec, channel, payloadType uint8) core.
 	}
 
 	flushBuf := func() {
-		if err := c.conn.SetWriteDeadline(time.Now().Add(Timeout)); err != nil {
-			return
-		}
 		//log.Printf("[rtsp] channel:%2d write_size:%6d buffer_size:%6d", channel, n, len(buf))
-		if _, err := c.conn.Write(buf[:n]); err == nil {
-			c.Send += n
+
+		if c.Transport == "udp" {
+			if err := c.sendUDPRtpPacket(buf[:n]); err == nil {
+				c.Send += n
+			}
+		} else {
+			if err := c.conn.SetWriteDeadline(time.Now().Add(Timeout)); err != nil {
+				return
+			}
+
+			if _, err := c.conn.Write(buf[:n]); err == nil {
+				c.Send += n
+			}
 		}
+
 		n = 0
 	}
 
@@ -164,7 +176,7 @@ func (c *Conn) packetWriter(codec *core.Codec, channel, payloadType uint8) core.
 		}
 	} else if codec.Name == core.CodecPCML {
 		handlerFunc = pcm.LittleToBig(handlerFunc)
-	} else if c.PacketSize != 0 {
+	} else {
 		switch codec.Name {
 		case core.CodecH264:
 			handlerFunc = h264.RTPPay(c.PacketSize, handlerFunc)

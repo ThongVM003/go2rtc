@@ -88,8 +88,6 @@ func (c *Client) AddTrack(media *core.Media, codec *core.Codec, track *core.Rece
 }
 
 func (c *Client) Start() (err error) {
-	// just block until c.conn closed
-	b := make([]byte, 1)
-	_, err = c.conn.Read(b)
+	_, err = c.conn.Read(nil)
 	return
 }

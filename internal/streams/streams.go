@@ -1,14 +1,17 @@
 package streams
 
 import (
+	"encoding/base64"
 	"errors"
 	"net/url"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/AlexxIT/go2rtc/internal/api"
 	"github.com/AlexxIT/go2rtc/internal/app"
+	"github.com/AlexxIT/go2rtc/pkg/shell"
 	"github.com/rs/zerolog"
 )
 
@@ -52,8 +55,38 @@ func Init() {
 
 var sanitize = regexp.MustCompile(`\s`)
 
-// Validate - not allow creating dynamic streams with spaces in the source
+func DecodeExecSource(source string) (string, error) {
+	if strings.HasPrefix(source, "exec:base64:") {
+		encodedPart := strings.TrimPrefix(source, "exec:base64:")
+		decodedBytes, err := base64.StdEncoding.DecodeString(encodedPart)
+		if err != nil {
+			return "", err
+		}
+		return "exec:" + string(decodedBytes), nil
+	}
+	return source, nil
+}
+
+func DecodeSources(sources ...string) ([]string, error) {
+	decodedSources := make([]string, len(sources))
+
+	for i, source := range sources {
+		decodedSource, err := DecodeExecSource(source)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to decode base64 exec command")
+			return nil, err
+		}
+		decodedSources[i] = decodedSource
+	}
+
+	return decodedSources, nil
+}
+
+// Validate - not allow creating dynamic streams with spaces in the source, except exec:base64:*
 func Validate(source string) error {
+	if strings.HasPrefix(source, "exec:base64:") {
+		return nil
+	}
 	if sanitize.MatchString(source) {
 		return errors.New("streams: invalid dynamic source")
 	}
@@ -61,13 +94,22 @@ func Validate(source string) error {
 }
 
 func New(name string, sources ...string) *Stream {
-	for _, source := range sources {
+	decodedSources := make([]string, len(sources))
+
+	for i, source := range sources {
 		if Validate(source) != nil {
 			return nil
 		}
+
+		decoded, err := DecodeExecSource(source)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to decode base64 exec command")
+			return nil
+		}
+		decodedSources[i] = decoded
 	}
 
-	stream := NewStream(sources)
+	stream := NewStream(decodedSources)
 
 	streamsMu.Lock()
 	streams[name] = stream
@@ -135,7 +177,7 @@ func GetOrPatch(query url.Values) *Stream {
 
 	// check if name param provided
 	if name := query.Get("name"); name != "" {
-		log.Info().Msgf("[streams] create new stream url=%s", source)
+		log.Info().Msgf("[streams] create new stream url=%s", shell.Redact(source))
 
 		return Patch(name, source)
 	}
@@ -171,6 +213,23 @@ func GetAllNames() []string {
 	}
 	streamsMu.Unlock()
 	return names
+}
+
+// GetStreamName returns the name of a stream by searching through the streams map
+func GetStreamName(stream *Stream) string {
+	if stream == nil {
+		return ""
+	}
+	
+	streamsMu.Lock()
+	defer streamsMu.Unlock()
+	
+	for name, s := range streams {
+		if s == stream {
+			return name
+		}
+	}
+	return ""
 }
 
 func GetAllSources() map[string][]string {

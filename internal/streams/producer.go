@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/AlexxIT/go2rtc/pkg/core"
+	"github.com/AlexxIT/go2rtc/pkg/shell"
 )
 
 type state byte
@@ -34,23 +35,31 @@ type Producer struct {
 	state    state
 	mu       sync.Mutex
 	workerID int
+
+	gopEnabled bool
 }
 
 const SourceTemplate = "{input}"
 
 func NewProducer(source string) *Producer {
+	rawSource, gop, _ := strings.Cut(source, "#gop=")
+	gopEnabled := gop == "1"
+
 	if strings.Contains(source, SourceTemplate) {
-		return &Producer{template: source}
+		return &Producer{template: rawSource, gopEnabled: gopEnabled}
 	}
 
-	return &Producer{url: source}
+	return &Producer{url: rawSource, gopEnabled: gopEnabled}
 }
 
 func (p *Producer) SetSource(s string) {
+	rawSource, gop, _ := strings.Cut(s, "#gop=")
+	p.gopEnabled = gop == "1"
+
 	if p.template == "" {
-		p.url = s
+		p.url = rawSource
 	} else {
-		p.url = strings.Replace(p.template, SourceTemplate, s, 1)
+		p.url = strings.Replace(p.template, SourceTemplate, rawSource, 1)
 	}
 }
 
@@ -101,6 +110,10 @@ func (p *Producer) GetTrack(media *core.Media, codec *core.Codec) (*core.Receive
 		return nil, err
 	}
 
+	if p.gopEnabled {
+		track.SetupGOP()
+	}
+
 	p.receivers = append(p.receivers, track)
 
 	if p.state == stateMedias {
@@ -149,7 +162,7 @@ func (p *Producer) start() {
 		return
 	}
 
-	log.Debug().Msgf("[streams] start producer url=%s", p.url)
+	log.Debug().Msgf("[streams] start producer url=%s", shell.Redact(p.url))
 
 	p.state = stateStart
 	p.workerID++
@@ -167,7 +180,7 @@ func (p *Producer) worker(conn core.Producer, workerID int) {
 			return
 		}
 
-		log.Warn().Err(err).Str("url", p.url).Caller().Send()
+		log.Warn().Err(err).Str("url", shell.Redact(p.url)).Caller().Send()
 	}
 
 	p.reconnect(workerID, 0)
@@ -178,11 +191,11 @@ func (p *Producer) reconnect(workerID, retry int) {
 	defer p.mu.Unlock()
 
 	if p.workerID != workerID {
-		log.Trace().Msgf("[streams] stop reconnect url=%s", p.url)
+		log.Trace().Msgf("[streams] stop reconnect url=%s", shell.Redact(p.url))
 		return
 	}
 
-	log.Debug().Msgf("[streams] retry=%d to url=%s", retry, p.url)
+	log.Debug().Msgf("[streams] retry=%d to url=%s", retry, shell.Redact(p.url))
 
 	conn, err := GetProducer(p.url)
 	if err != nil {
@@ -215,6 +228,10 @@ func (p *Producer) reconnect(workerID, retry int) {
 				track, err := conn.GetTrack(media, codec)
 				if err != nil {
 					continue
+				}
+
+				if p.gopEnabled {
+					track.SetupGOP()
 				}
 
 				receiver.Replace(track)
@@ -257,7 +274,7 @@ func (p *Producer) stop() {
 		p.workerID++
 	}
 
-	log.Debug().Msgf("[streams] stop producer url=%s", p.url)
+	log.Debug().Msgf("[streams] stop producer url=%s", shell.Redact(p.url))
 
 	if p.conn != nil {
 		_ = p.conn.Stop()

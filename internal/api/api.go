@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"github.com/AlexxIT/go2rtc/internal/app"
+	"github.com/AlexxIT/go2rtc/pkg/shell"
 	"github.com/rs/zerolog"
 )
 
@@ -29,6 +32,7 @@ func Init() {
 			TLSListen  string `yaml:"tls_listen"`
 			TLSCert    string `yaml:"tls_cert"`
 			TLSKey     string `yaml:"tls_key"`
+			TLSCa      string `yaml:"tls_ca"`
 			UnixListen string `yaml:"unix_listen"`
 		} `yaml:"api"`
 	}
@@ -69,19 +73,22 @@ func Init() {
 	}
 
 	if cfg.Mod.Listen != "" {
+		IsHTTP = true
 		_, port, _ := net.SplitHostPort(cfg.Mod.Listen)
 		Port, _ = strconv.Atoi(port)
 		go listen("tcp", cfg.Mod.Listen)
 	}
 
 	if cfg.Mod.UnixListen != "" {
+		IsUnix = true
 		_ = syscall.Unlink(cfg.Mod.UnixListen)
 		go listen("unix", cfg.Mod.UnixListen)
 	}
 
 	// Initialize the HTTPS server
 	if cfg.Mod.TLSListen != "" && cfg.Mod.TLSCert != "" && cfg.Mod.TLSKey != "" {
-		go tlsListen("tcp", cfg.Mod.TLSListen, cfg.Mod.TLSCert, cfg.Mod.TLSKey)
+		IsHTTPS = true
+		go tlsListen("tcp", cfg.Mod.TLSListen, cfg.Mod.TLSCert, cfg.Mod.TLSKey, cfg.Mod.TLSCa)
 	}
 }
 
@@ -103,7 +110,7 @@ func listen(network, address string) {
 	}
 }
 
-func tlsListen(network, address, certFile, keyFile string) {
+func tlsListen(network, address, certFile, keyFile, caFile string) {
 	var cert tls.Certificate
 	var err error
 	if strings.IndexByte(certFile, '\n') < 0 && strings.IndexByte(keyFile, '\n') < 0 {
@@ -118,6 +125,24 @@ func tlsListen(network, address, certFile, keyFile string) {
 		return
 	}
 
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+	}
+
+	if caFile != "" {
+		caData, err := os.ReadFile(caFile)
+		if err != nil {
+			log.Error().Err(err).Msg("[api] failed to read CA file")
+			return
+		}
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM(caData) {
+			log.Error().Msg("[api] failed to parse CA certificate")
+			return
+		}
+		tlsConfig.ClientCAs = certPool
+	}
+
 	ln, err := net.Listen(network, address)
 	if err != nil {
 		log.Error().Err(err).Msg("[api] tls listen")
@@ -128,7 +153,7 @@ func tlsListen(network, address, certFile, keyFile string) {
 
 	server := &http.Server{
 		Handler:           Handler,
-		TLSConfig:         &tls.Config{Certificates: []tls.Certificate{cert}},
+		TLSConfig:         tlsConfig,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	if err = server.ServeTLS(ln, "", ""); err != nil {
@@ -164,10 +189,20 @@ func ResponseJSON(w http.ResponseWriter, v any) {
 }
 
 func ResponsePrettyJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", MimeJSON)
-	enc := json.NewEncoder(w)
+	w.Header().Set("Content-Type", "application/json")
+
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(v)
+	err := enc.Encode(v)
+
+	if err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	redactedJSON := shell.Redact(buf.String())
+	w.Write([]byte(redactedJSON))
 }
 
 func Response(w http.ResponseWriter, body any, contentType string) {
@@ -185,12 +220,15 @@ func Response(w http.ResponseWriter, body any, contentType string) {
 
 const StreamNotFound = "stream not found"
 
+var IsHTTP bool
+var IsHTTPS bool
+var IsUnix bool
 var basePath string
 var log zerolog.Logger
 
 func middlewareLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Trace().Msgf("[api] %s %s %s", r.Method, r.URL, r.RemoteAddr)
+		log.Trace().Msgf("[api] %s %s %s", r.Method, shell.Redact(r.URL.String()), r.RemoteAddr)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -284,6 +322,21 @@ type Source struct {
 	Info     string `json:"info,omitempty"`
 	URL      string `json:"url,omitempty"`
 	Location string `json:"location,omitempty"`
+}
+
+func ResponseSource(w http.ResponseWriter, source *Source) {
+	if source == nil {
+		http.Error(w, "source not found", http.StatusNotFound)
+		return
+	}
+
+	var response = struct {
+		Source *Source `json:"source"`
+	}{
+		Source: source,
+	}
+
+	ResponseJSON(w, response)
 }
 
 func ResponseSources(w http.ResponseWriter, sources []*Source) {

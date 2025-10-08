@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/AlexxIT/go2rtc/pkg/creds"
+	"github.com/AlexxIT/go2rtc/pkg/shell"
 	"github.com/AlexxIT/go2rtc/pkg/yaml"
 )
 
@@ -71,15 +71,13 @@ func initConfig(confs flagConfig) {
 			// config as file
 			if ConfigPath == "" {
 				ConfigPath = conf
-				initStorage()
 			}
 
 			if data, _ = os.ReadFile(conf); data == nil {
 				continue
 			}
 
-			loadEnv(data)
-			data = creds.ReplaceVars(data)
+			data = []byte(shell.ReplaceEnvVars(string(data)))
 			configs = append(configs, data)
 		}
 	}

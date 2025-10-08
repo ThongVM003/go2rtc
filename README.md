@@ -8,7 +8,13 @@
   [![goreport](https://goreportcard.com/badge/github.com/AlexxIT/go2rtc)](https://goreportcard.com/report/github.com/AlexxIT/go2rtc)
 </h1>
 
-Ultimate camera streaming application with support for RTSP, WebRTC, HomeKit, FFmpeg, RTMP, etc.
+> **⚠️ WARNING: camera.ui specific fork**
+> 
+> This is a modified version of go2rtc that has been customized for [camera.ui](https://github.com/seydx/camera.ui). It includes changes that are not available in the official go2rtc release and may not be suitable for standalone use.
+> 
+> For general go2rtc usage, please use the [official repository](https://github.com/AlexxIT/go2rtc). This fork is specifically maintained for camera.ui integration.
+
+Ultimate camera streaming application with support RTSP, WebRTC, HomeKit, FFmpeg, RTMP, etc.
 
 ![](assets/go2rtc.png)
 
@@ -49,6 +55,7 @@ Ultimate camera streaming application with support for RTSP, WebRTC, HomeKit, FF
   * [go2rtc: Dev version](#go2rtc-dev-version)
 * [Configuration](#configuration)
   * [Module: Streams](#module-streams)
+    * [GOP Cache](#gop-cache)
     * [Two way audio](#two-way-audio)
     * [Source: RTSP](#source-rtsp)
     * [Source: RTMP](#source-rtmp)
@@ -64,6 +71,7 @@ Ultimate camera streaming application with support for RTSP, WebRTC, HomeKit, FF
     * [Source: DVRIP](#source-dvrip)
     * [Source: Tapo](#source-tapo)
     * [Source: Kasa](#source-kasa)
+    * [Source: Tuya](#source-tuya)
     * [Source: GoPro](#source-gopro)
     * [Source: Ivideon](#source-ivideon)
     * [Source: Hass](#source-hass)
@@ -202,6 +210,7 @@ Available source types:
 - [dvrip](#source-dvrip) - streaming from DVR-IP NVR
 - [tapo](#source-tapo) - TP-Link Tapo cameras with [two way audio](#two-way-audio) support
 - [ring](#source-ring) - Ring cameras with [two way audio](#two-way-audio) support
+- [tuya](#source-tuya) - Tuya cameras with [two way audio](#two-way-audio) support
 - [kasa](#source-tapo) - TP-Link Kasa cameras
 - [gopro](#source-gopro) - GoPro cameras
 - [ivideon](#source-ivideon) - public cameras from [Ivideon](https://tv.ivideon.com/) service
@@ -213,6 +222,17 @@ Available source types:
 
 Read more about [incoming sources](#incoming-sources)
 
+#### GOP Cache
+
+go2rtc has a built-in [GOP cache](https://en.wikipedia.org/wiki/Group_of_pictures) for all sources. It allows to reduce the delay of the stream by caching the last GOP (Group of Pictures) frames. This is useful for sources with high latency, such as some IP cameras. The cache is disabled by default and can be configured in the config file.
+
+```yaml
+streams:
+  unifi_camera: rtspx://192.168.1.123:7441/fD6ouM72bWoFijxK#gop=1
+```
+
+**RTSP clients** can use the `?gop=0` query to request the stream without GOP cache even if it is enabled for the source in the config file.
+
 #### Two-way audio
 
 Supported sources:
@@ -223,7 +243,7 @@ Supported sources:
 - [Hikvision ISAPI](#source-isapi) cameras
 - [Roborock vacuums](#source-roborock) models with cameras
 - [Exec](#source-exec) audio on server
-- [Ring](#source-ring) cameras
+- [Tuya](#source-tuya) cameras
 - [Any Browser](#incoming-browser) as IP-camera
 
 Two-way audio can be used in browser with [WebRTC](#module-webrtc) technology. The browser will give access to the microphone only for HTTPS sites ([read more](https://stackoverflow.com/questions/52759992/how-to-access-camera-and-microphone-in-chrome-without-https)).
@@ -263,6 +283,7 @@ Format: `rtsp...#{param1}#{param2}#{param3}`
 - Ignore audio - `#media=video` or ignore video - `#media=audio` 
 - Ignore two-way audio API `#backchannel=0` - important for some glitchy cameras
 - Use WebSocket transport `#transport=ws...`
+- Use UDP transport `#transport=udp`
 
 **RTSP over WebSocket**
 
@@ -272,6 +293,7 @@ streams:
   axis-rtsp-ws:  rtsp://192.168.1.123:4567/axis-media/media.amp?overview=0&camera=1&resolution=1280x720&videoframeskipmode=empty&Axis-Orig-Sw=true#transport=ws://user:pass@192.168.1.123:4567/rtsp-over-websocket
   # WebSocket without authorization, RTSP - with
   dahua-rtsp-ws: rtsp://user:pass@192.168.1.123/cam/realmonitor?channel=1&subtype=1&proto=Private3#transport=ws://192.168.1.123/rtspoverwebsocket
+  udp_camera:   rtsp://user:pass@192.168.1.345:554/stream1#transport=udp
 ```
 
 #### Source: RTMP
@@ -572,6 +594,43 @@ streams:
 ```
 
 Tested: KD110, KC200, KC401, KC420WS, EC71.
+
+#### Source: Tuya
+
+[Tuya](https://www.tuya.com/) proprietary camera protocol with **two way audio** support. Go2rtc supports `Tuya Smart API` and `Tuya Cloud API`.
+
+**Tuya Smart API (recommended)**:
+- Cameras can be discovered through the go2rtc web interface via Tuya Smart account (Add > Tuya > Select region and fill in email and password > Login).
+- **Smart Life accounts are not supported**, you need to create a Tuya Smart account. If the cameras are already added to the Smart Life app, you need to remove them and add them again to the Tuya Smart app.
+
+**Tuya Cloud API**:
+- Requires setting up a cloud project in the Tuya Developer Platform.
+- Obtain `device_id`, `client_id`, `client_secret`, and `uid` from [Tuya IoT Platform](https://iot.tuya.com/). [Here's a guide](https://xzetsubou.github.io/hass-localtuya/cloud_api/).
+- Please ensure that you have subscribed to the `IoT Video Live Stream` service (Free Trial) in the Tuya Developer Platform, otherwise the stream will not work (Tuya Developer Platform > Service API > Authorize > IoT Video Live Stream).
+
+**Configuring the stream:**
+- Use `resolution` parameter to select the stream (not all cameras support `hd` stream through WebRTC even if the camera has it):
+  - `hd` - HD stream (default)
+  - `sd` - SD stream
+
+```yaml
+streams:
+  # Tuya Smart API: WebRTC main stream (use Add > Tuya to discover the URL)
+  tuya_main:
+    - tuya://protect-us.ismartlife.me?device_id=XXX&email=XXX&password=XXX
+
+  # Tuya Smart API: WebRTC sub stream (use Add > Tuya to discover the URL)
+  tuya_sub:
+    - tuya://protect-us.ismartlife.me?device_id=XXX&email=XXX&password=XXX&resolution=sd
+
+  # Tuya Cloud API: WebRTC main stream
+  tuya_webrtc:
+   - tuya://openapi.tuyaus.com?device_id=XXX&uid=XXX&client_id=XXX&client_secret=XXX
+  
+  # Tuya Cloud API: WebRTC sub stream
+  tuya_webrtc_sd:
+   - tuya://openapi.tuyaus.com?device_id=XXX&uid=XXX&client_id=XXX&client_secret=XXX&resolution=sd
+```
 
 #### Source: GoPro
 

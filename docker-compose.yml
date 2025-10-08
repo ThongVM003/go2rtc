@@ -1,0 +1,42 @@
+name: go2rtc
+
+x-base-service: &base-service
+  restart: unless-stopped
+  networks:
+    - services
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "50m"
+
+  tty: true
+
+services:
+  go2rtc:
+    <<: *base-service
+    image: gogo:v1.0.0
+    build:
+      context: .
+      dockerfile: docker/hardware.Dockerfile
+    container_name: go2rtc
+    ports:
+      - "3597:1984"
+      # - "5541:8554"
+      # - "8555:8555"
+    restart: unless-stopped
+    working_dir: /config
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - ~/.becaivms/go2rtc:/config
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu, video, display]
+
+networks:
+  services:
+    external: true

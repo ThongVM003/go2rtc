@@ -6,13 +6,11 @@ import (
 	"github.com/AlexxIT/go2rtc/internal/api"
 	"github.com/AlexxIT/go2rtc/internal/app"
 	"github.com/AlexxIT/go2rtc/pkg/core"
-	"github.com/AlexxIT/go2rtc/pkg/creds"
+	"github.com/AlexxIT/go2rtc/pkg/hap"
 	"github.com/AlexxIT/go2rtc/pkg/probe"
 )
 
 func apiStreams(w http.ResponseWriter, r *http.Request) {
-	w = creds.SecretResponse(w)
-
 	query := r.URL.Query()
 	src := query.Get("src")
 
@@ -57,7 +55,13 @@ func apiStreams(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if err := app.PatchConfig([]string{"streams", name}, query["src"]); err != nil {
+		sources, err := DecodeSources(query["src"]...)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if err := app.PatchConfig([]string{"streams", name}, sources); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		}
 
@@ -98,6 +102,13 @@ func apiStreams(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case "DELETE":
+		stream := Get(src)
+		if stream != nil {
+			if rawURL := FindPrefixURL("homekit", stream.Sources()); rawURL != "" {
+				_ = hap.Unpair(rawURL)
+			}
+		}
+
 		delete(streams, src)
 
 		if err := app.PatchConfig([]string{"streams", src}, nil); err != nil {
@@ -124,8 +135,6 @@ func apiStreamsDOT(w http.ResponseWriter, r *http.Request) {
 	}
 	dot = append(dot, '}')
 
-	dot = []byte(creds.SecretString(string(dot)))
-
 	api.Response(w, dot, "text/vnd.graphviz")
 }
 
@@ -141,6 +150,23 @@ func apiPreload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch r.Method {
+	case "GET":
+		response := struct {
+			Src    string `json:"src"`
+			Status string `json:"status"`
+		}{
+			Src: src,
+		}
+
+		if ok := HasPreload(stream); ok {
+			response.Status = "started"
+
+			api.ResponseJSON(w, response)
+		} else {
+			response.Status = "stopped"
+			api.ResponseJSON(w, response)
+			return
+		}
 	case "PUT":
 		// it's safe to delete from map while iterating
 		for k := range query {
