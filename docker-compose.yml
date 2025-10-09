@@ -24,8 +24,6 @@ services:
       - "1984:1984"
       - "8554:8554"
       - "8555:8555"
-      # ICE
-      - "40000-40100:40000-40100/udp"
     restart: unless-stopped
     working_dir: /config
     volumes:
