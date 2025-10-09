@@ -15,10 +15,10 @@ x-base-service: &base-service
 services:
   go2rtc:
     <<: *base-service
-    image: gogo-hardware:v1.0.0
+    image: gogo:v1.0.0
     build:
       context: .
-      dockerfile: docker/hardware.Dockerfile
+      dockerfile: docker/Dockerfile
     container_name: go2rtc
     ports:
       - "1984:1984"
