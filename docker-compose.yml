@@ -4,6 +4,7 @@ x-base-service: &base-service
   restart: unless-stopped
   networks:
     - services
+  # network_mode: "host"
   logging:
     driver: "json-file"
     options:
@@ -14,21 +15,23 @@ x-base-service: &base-service
 services:
   go2rtc:
     <<: *base-service
-    image: gogo:v1.0.0
+    image: gogo-hardware:v1.0.0
     build:
       context: .
       dockerfile: docker/hardware.Dockerfile
     container_name: go2rtc
     ports:
-      - "3597:1984"
-      # - "5541:8554"
-      # - "8555:8555"
+      - "1984:1984"
+      - "8554:8554"
+      - "8555:8555"
+      # ICE
+      - "40000-40100:40000-40100/udp"
     restart: unless-stopped
     working_dir: /config
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - ~/.becaivms/go2rtc:/config
+      - .test_config:/config
     # deploy:
     #   resources:
     #     reservations:
