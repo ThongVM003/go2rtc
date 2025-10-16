@@ -267,6 +267,40 @@ func (ps *PreloadedStream) GetSegment(filename string) ([]byte, error) {
 	return data, nil
 }
 
+
+func (ps *PreloadedStream) GetPlaylistForStreamAI() ([]byte, error) {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	
+	// Generate playlist with relative URLs for /stream/ai/ endpoint
+	var playlist strings.Builder
+	
+	if ps.isMP4 {
+		playlist.WriteString("#EXTM3U\n")
+		playlist.WriteString("#EXT-X-VERSION:6\n")
+		playlist.WriteString(fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", int(segmentDuration.Seconds())))
+		playlist.WriteString(fmt.Sprintf("#EXT-X-MEDIA-SEQUENCE:%d\n", ps.sequence-len(ps.segments)))
+		playlist.WriteString("#EXT-X-MAP:URI=\"init.mp4\"\n")
+		
+		for _, segment := range ps.segments {
+			playlist.WriteString(fmt.Sprintf("#EXTINF:%.3f,\n", segmentDuration.Seconds()))
+			playlist.WriteString(fmt.Sprintf("%s\n", segment))
+		}
+	} else {
+		playlist.WriteString("#EXTM3U\n")
+		playlist.WriteString("#EXT-X-VERSION:3\n")
+		playlist.WriteString(fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", int(segmentDuration.Seconds())))
+		playlist.WriteString(fmt.Sprintf("#EXT-X-MEDIA-SEQUENCE:%d\n", ps.sequence-len(ps.segments)))
+		
+		for _, segment := range ps.segments {
+			playlist.WriteString(fmt.Sprintf("#EXTINF:%.3f,\n", segmentDuration.Seconds()))
+			playlist.WriteString(fmt.Sprintf("%s\n", segment))
+		}
+	}
+	
+	return []byte(playlist.String()), nil
+}
+
 func (ps *PreloadedStream) GetInit() ([]byte, error) {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()

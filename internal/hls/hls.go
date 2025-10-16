@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"sync"
 	"time"
+	"strings"
 
 	"github.com/AlexxIT/go2rtc/internal/api"
 	"github.com/AlexxIT/go2rtc/internal/api/ws"
@@ -42,6 +43,9 @@ func Init() {
 	// Preload handlers
 	api.HandleFunc("api/hls/preload_segment", handlerPreloadSegment)
 	api.HandleFunc("api/hls/preload_init.mp4", handlerPreloadInit)
+
+	// Stream-based preload endpoints (direct file access)
+	api.HandleFunc("stream/ai/", handlerStreamPreload)
 
 	ws.HandleFunc("hls", handlerWSHLS)
 }
@@ -474,6 +478,80 @@ func handlerSegmentMP4(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, err := w.Write(data); err != nil {
+		log.Error().Err(err).Caller().Send()
+	}
+}
+
+
+// handlerStreamPreload handles requests to /stream/ai/{streamName}/{file}
+// This provides direct access to preloaded HLS files (m3u8 and m4s)
+func handlerStreamPreload(w http.ResponseWriter, r *http.Request) {
+	// CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	
+	if r.Method == "OPTIONS" {
+		w.Header().Set("Access-Control-Allow-Methods", "GET")
+		return
+	}
+
+	// Parse the URL path: /stream/ai/{streamName}/{file}
+	// Remove leading "/stream/ai/"
+	path := r.URL.Path
+	if !strings.HasPrefix(path, "/stream/ai/") {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	
+	// Extract stream name and file
+	parts := strings.Split(strings.TrimPrefix(path, "/stream/ai/"), "/")
+	if len(parts) < 2 {
+		http.Error(w, "invalid path format, expected /stream/ai/{streamName}/{file}", http.StatusBadRequest)
+		return
+	}
+	
+	streamName := parts[0]
+	fileName := parts[1]
+	
+	// Get the preloaded stream
+	preloadedMu.RLock()
+	ps, exists := preloadedStreams[streamName]
+	preloadedMu.RUnlock()
+	
+	if !exists {
+		http.Error(w, "preloaded stream not found", http.StatusNotFound)
+		return
+	}
+	
+	// Determine what type of file is being requested
+	var data []byte
+	var err error
+	var contentType string
+	
+	if fileName == "playlist.m3u8" || strings.HasSuffix(fileName, ".m3u8") {
+		// Serve playlist with relative URLs
+		data, err = ps.GetPlaylistForStreamAI()
+		contentType = "application/vnd.apple.mpegurl"
+	} else if fileName == "init.mp4" {
+		// Serve init segment (from memory, not disk)
+		data, err = ps.GetInit()
+		contentType = "video/mp4"
+	} else if strings.HasSuffix(fileName, ".m4s") || strings.HasSuffix(fileName, ".ts") {
+		// Serve media segment
+		data, err = ps.GetSegment(fileName)
+		contentType = "video/mp4"
+	} else {
+		http.Error(w, "unsupported file type", http.StatusBadRequest)
+		return
+	}
+	
+	if err != nil {
+		log.Warn().Err(err).Str("stream", streamName).Str("file", fileName).Msg("[hls] can't get preload file")
+		http.NotFound(w, r)
+		return
+	}
+	
+	w.Header().Set("Content-Type", contentType)
 	if _, err := w.Write(data); err != nil {
 		log.Error().Err(err).Caller().Send()
 	}
