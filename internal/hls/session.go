@@ -137,14 +137,16 @@ func (s *Session) Init() (init []byte) {
 	}
 	
 	// Fallback to original behavior
+	// Return init immediately once available, don't wait for buffer
 	for i := 0; i < 60 && init == nil; i++ {
 		if i > 0 {
 			time.Sleep(50 * time.Millisecond)
 		}
 
-		// return init only when have some buffer
-		if len(s.buffer) > 0 {
+		// Return init as soon as it's available, no need to wait for buffer
+		if s.init != nil {
 			init = s.init
+			return init
 		}
 	}
 

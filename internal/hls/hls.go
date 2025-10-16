@@ -235,6 +235,8 @@ func handlerPreloadSegment(w http.ResponseWriter, r *http.Request) {
 func handlerPreloadInit(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Add("Content-Type", "video/mp4")
+	// Add caching headers for init segment - it never changes for a stream
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 
 	if r.Method == "OPTIONS" {
 		w.Header().Set("Access-Control-Allow-Methods", "GET")

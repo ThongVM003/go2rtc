@@ -15,7 +15,7 @@ import (
 
 const (
 	segmentDuration = 4 * time.Second
-	maxSegments     = 5
+	maxSegments     = 10
 	segmentPrefix   = "segment"
 )
 
